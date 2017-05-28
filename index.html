@@ -1,0 +1,135 @@
+<script src="https://www.gstatic.com/firebasejs/4.0.0/firebase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/blueimp-md5/2.7.0/js/md5.min.js"></script>
+<script>
+    // Initialize Firebase
+    var config = {
+        apiKey: "AIzaSyAaxX2V1Le0HEdo6C0ZWyy7QFlgjnkINjs",
+        authDomain: "dobuki.firebaseapp.com",
+        databaseURL: "https://dobuki.firebaseio.com",
+        projectId: "firebase-dobuki",
+        storageBucket: "firebase-dobuki.appspot.com",
+        messagingSenderId: "475686014208"
+    };
+    firebase.initializeApp(config);
+</script>
+<script>
+    var uid = localStorage.getItem('uid');
+    if(!uid) {
+        uid =  md5(Math.random());
+        localStorage.setItem('uid', uid);
+    }
+
+    function createSynco(uid, source, firebase_source) {
+        console.log("CREATE SYNCO",uid,source);
+        if(!source) source = {};
+        if(!firebase_source) {
+            firebase_source = firebase.database().ref('synco');
+        }
+
+        function destroy() {
+            firebase_source.off();
+        }
+
+        function getReserved(word) {
+            switch(word) {
+                case '_destroy':
+                    return destroy;
+                    break;
+            }
+            return null;
+        }
+
+
+        var synco = new Proxy(source, {
+            set: function (target, property, value, receiver) {
+                if(getReserved(property)) {
+                    return;
+                }
+                if(target[property] && typeof(target[property])==='object') {
+                    if(target.lock && target.lock !== uid) {
+                        return;
+                    }
+                }
+                console.log('$$',target,property,value,receiver);
+
+                //  creating an object
+                if (typeof(value) === 'object') {
+                    console.log("HERE", target, target.lock);
+                    target[property] = createSynco(uid, value, firebase_source.child(property));
+                    if(!target.lock) {
+                        firebase_source.child(property).child('lock/user').set(uid);
+                        firebase_source.child(property).child('lock/time').set(firebase.database.ServerValue.TIMESTAMP);
+                        for(var prop in value) {
+                            firebase_source.child(property).child(prop).set(value[prop]);
+                        }
+                    }
+                } else {
+                    target[property] = value;
+                    firebase_source.child(property).set(value);
+                }
+            },
+            get: function (target, property, receiver) {
+                return getReserved(property) || target[property];
+            },
+            ownKeys: function (target) {
+                var keys = Object.getOwnPropertyNames(target);
+                var lockIndex = keys.indexOf('lock');
+                keys.splice(lockIndex,1);
+                return keys;
+            },
+            has: function(target, prop) {
+                if(prop==='lock') return false;
+                return prop in source;
+            },
+            deleteProperty: function(target, property) {
+                if(target[property] && typeof(target[property])==='object') {
+                    synco[property]._destroy();
+                }
+                delete target[property];
+                return true;
+            },
+        });
+
+        firebase_source.on('value', function(snapshot) {
+            var obj = snapshot.val();
+            if (typeof(obj) === 'object') {
+                var p;
+                for(p in obj) {
+                    if(!synco[p]) {
+                        synco[p] = obj[p];
+                    } else if(typeof(obj[p])!=='object') {
+                        delete synco[p];
+                        synco[p] = obj[p];
+                    }
+                }
+                for(p in synco) {
+                    if(!obj[p]) {
+                        delete synco[p];
+                    }
+                }
+            }
+        });
+
+        return synco;
+    }
+
+    var p = {};
+    var synco = createSynco(uid, p);
+
+/*    function getSynco() {
+        const database = firebase.database();
+        const firebase_global  = firebase.database().ref('global');
+        firebase_global.on('value', function(snapshot) {
+            console.log(snapshot.val());
+        });
+
+        var name;
+
+        var synco = {
+            set name(value) {
+                name = value;
+            }
+        };
+    }*/
+
+</script>
